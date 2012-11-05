@@ -9,6 +9,9 @@
 Module for retrieving, caching and analysing a VistA's schemas returned by FMQL
 
 TODO - Changes/Additions Planned:
+- tie in Packages ie/ from Slim Package grab, do hierarchy. Make a master copy.
+  - issue of common files: PATIENT/REGISTRATION
+- FMQL: ensure all meta - VR, INPUT TR etc.
 - CSV for field namespaces (MSC == 21400) and Station Numbers for VA private stuff
 - KEY FILES (fix for now based on FOIA refs)
 - any FMQLisms in Schema returned move in here
