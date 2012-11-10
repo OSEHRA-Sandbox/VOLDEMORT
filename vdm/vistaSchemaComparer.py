@@ -17,6 +17,7 @@ Generate Schema Comparison Reports using the VistaSchema module. Formats:
 Note: along with VistaSchema, this module can be part of a VOLDEMORT WSGI-based Web service. Such a service would allow analysis of any VistA with FMQL that is accessible from the service.
 
 TODO - Changes/Additions Planned:
+- # files common to both that different in some way (sub multiples as well as fields - show these up above????) 
 - for OTHER ONLY etc
   - multiples grouped under files for novel top files
   - separate table for multiples in common files
