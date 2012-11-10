@@ -17,6 +17,15 @@ Generate Schema Comparison Reports using the VistaSchema module. Formats:
 Note: along with VistaSchema, this module can be part of a VOLDEMORT WSGI-based Web service. Such a service would allow analysis of any VistA with FMQL that is accessible from the service.
 
 TODO - Changes/Additions Planned:
+- for OTHER ONLY etc
+  - multiples grouped under files for novel top files
+  - separate table for multiples in common files
+    top file    multiples
+       2       .., .., .., etc.
+  [comparator calls into report properly]
+- packages too (2 level ie/ if in > 1 build class - make a static file) ie/ assemble in the file ids per package (redo CSV or just load)
+- namespace logic into schema.py ie/ proper break out
+  - totals on # of class 3 sites, number of class files etc. ie/ of unique files, # that are class 3 vs global spaced.
 - fmqlId and counts logic move into VistaSchema
 - tie in to builds (do separate Files builds report first)
 - leverages Packages support once in VistaSchema
@@ -200,7 +209,7 @@ class VSHTMLReportBuilder:
         self.namespaces["214"] = "MEDSPHERE"
                        
     def startInBoth(self):
-        bothStart = "<div class='report' id='both'><h2>Differences between Files in Both</h2><p>Files common to both VistAs that have schema as opposed to content differences. Fields unique to %s (\"missing fields\") means %s has fallen behind and is missing some builds present in %s. Fields unique to %s (\"custom fields\") means it has added custom entries not found in %s. Entries labeled \"field name mismatch\" show fields with different names in each VistA. Some mismatches are superficial name variations but many represent the use of the same field for different purposes by each system. Note that this list <span class='highlight'>does not highlight differences in Lab files</span> - local sites customize these extensively. There needs to be a separate 'lab differences' report." % (self.__bVistaLabel, self.__oVistaLabel, self.__bVistaLabel, self.__oVistaLabel, self.__bVistaLabel)
+        bothStart = "<div class='report' id='both'><h2>Differences between Files in Both</h2><p>Files common to both VistAs that have schema as opposed to content differences. Fields unique to %s (\"missing fields\") means %s has fallen behind and is missing some builds present in %s. Fields unique to %s (\"custom fields\") means it has added custom entries not found in %s. Entries labeled \"field name mismatch\" show fields with different names in each VistA. Some mismatches are superficial name variations but many represent the use of the same field for different purposes by each system. Note that 'multiple fields' are not considered fields in this report - multiples are treated as (sub)files. And note that this list <span class='highlight'>does not highlight differences in Lab files</span> - local sites customize these extensively. There needs to be a separate 'lab differences' report." % (self.__bVistaLabel, self.__oVistaLabel, self.__bVistaLabel, self.__oVistaLabel, self.__bVistaLabel)
         self.__bothCompareItems = [bothStart]
         tblStartCompare = "<table><tr><th>Both #</th><th>Name/ID/Locn</th><th># Entries</th><th>Fields Missing</th><th>Custom Fields</th></tr>"
         self.__bothCompareItems.append(tblStartCompare)
@@ -221,7 +230,7 @@ class VSHTMLReportBuilder:
         if bnameTest == onameTest:
             self.__bothCompareItems.append("<td>%s<br/><br/>" % bname)
         else:
-            self.__bothCompareItems.append("<td class='highlight'><span class='titleInCol'>File Name Mismatch</span><br/>" + bname + "<br/>" + oname + "<br/><br/>")
+            self.__bothCompareItems.append("<td class='highlight'><span class='titleInCol'>File Name Mismatch</span><br/>" + bname + "<br/><br/>" + oname + "<br/><br/>")
         if location:
             self.__bothCompareItems.append("%s &nbsp;%s</td>" % (id, self.__location(location)))
         else:
@@ -266,16 +275,23 @@ class VSHTMLReportBuilder:
     def __muFields(self, fields):
         muFields = ""
         for field in fields:
+            if field["name"] == "opai":
+                print field
+                print x
             if muFields:
                 muFields += ", "
             fieldNumberMU = field["number"]
             # TODO: 776XXX etc which don't match. What are they? Check?
             if re.match(r'\d{6}\.?', field["number"]):
-                vaStationId = re.match(r'(\d{3})', field["number"]).group(1)
-                if vaStationId in self.namespaces:
-                    fieldNumberMU = "<strong>" + field["number"] + " (" + self.namespaces[vaStationId] + ")</strong>"
+                fieldNumberMU = self.__vaStationId(field["number"])
             muFields += self.__niceFieldName(field["name"]) + " (%s)" % fieldNumberMU
         return muFields
+        
+    def __vaStationId(self, id):
+        vaStationId = re.match(r'(\d{3})', id).group(1)
+        if vaStationId in self.namespaces:
+            return id + " [<strong>" + self.namespaces[vaStationId] + "</strong>]"
+        return id
         
     def __niceFieldName(self, fieldName):
         return re.sub(r'\_', ' ', fieldName)
@@ -297,13 +313,14 @@ class VSHTMLReportBuilder:
         if parent:
             self.__parents[fileId] = (parent, name)
         if location:
-            self.__oneOnlyItems.append("<td>%s</td><td>%s</td>" % (fileId + "<br/><br/>" + self.__location(location), name))
+            fileIdMU = fileId if not re.match(r'\d{6}', fileId) else self.__vaStationId(fileId)
+            self.__oneOnlyItems.append("<td>%s</td><td>%s</td>" % (fileIdMU + "<br/><br/>" + self.__location(location), name))
         else:
             self.__oneOnlyItems.append("<td>%s</td><td>%s</td>" % (self.__subFileId(fileId, parent), name))
         self.__oneOnlyItems.append("<td>%s</td><td>%s</td><td>%s</td></tr>" % (noFields, count, descr))
         
     def __subFileId(self, fileId, parent):
-        ids = [fileId]
+        ids = [parent, fileId]
         while parent in self.__parents:
             ids.insert(0, self.__parents[parent][0])
             parent = self.__parents[parent][0]
@@ -311,9 +328,19 @@ class VSHTMLReportBuilder:
         indent = ""
         indentInc = "&nbsp;&nbsp;&nbsp;"
         for id in ids:
+            idMU = id
             if subFileId:
                 subFileId += "<br/>"
-            subFileId = subFileId + indent + id
+                """
+                Check all subfiles for ...
+                The VA FileMan subdictionary numbers should be assigned at the high end of the numbering sequence, following the numbering convention outlined. For example, a VA FileMan subdictionary number added to the Patient file (File 2) by station 368 should be 2.368001, a second subdictionary should be assigned 2.368002
+                """
+                if re.search(r'\.\d{6}$', id):
+                    sid = id.split(".")[1]
+                    idMU = id.split(".")[0] + "." + self.__vaStationId(sid)
+            elif re.match(r'\d{6}', id): # check parent file if local site
+                idMU = self.__vaStationId(id)
+            subFileId = subFileId + indent + idMU
             indent = indent + indentInc
         return subFileId
         
@@ -397,7 +424,8 @@ def demo():
     gCacher.setVista("GOLD")
     oCacher = FMQLCacher("Caches")
     oCacher.setVista("CGVISTA", "http://vista.caregraf.org/fmqlEP")
-    vsr = VistaSchemaComparer(VistaSchema("GOLD", gCacher), VistaSchema("CGVISTA", oCacher))
+    oCacher.setVista("OSGVISTA")
+    vsr = VistaSchemaComparer(VistaSchema("GOLD", gCacher), VistaSchema("OSGVISTA", oCacher))
     reportLocation = vsr.compare(format="HTML")
     print "Report written to %s" % reportLocation
         

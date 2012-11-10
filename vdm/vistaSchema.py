@@ -11,7 +11,8 @@ Module for retrieving, caching and analysing a VistA's schemas returned by FMQL
 TODO - Changes/Additions Planned:
 - tie in Packages ie/ from Slim Package grab, do hierarchy. Make a master copy.
   - issue of common files: PATIENT/REGISTRATION
-- FMQL: ensure all meta - VR, INPUT TR etc.
+- FMQL: ensure all meta - VR, INPUT TR etc. Input Tr often differs with data there ie mandatory or not ie. live vs meta data mismatch
+- Frozen Files: ex/ 59.7 - "THERE SHOULD ONLY BE ONE ENTRY IN THIS FILE. Because of the nature of this file and the fact that ALL the Pharmacy packages use this file, it is VERY IMPORTANT to stress that sites DO NOT edit fields or make local field additions to the Pharmacy System file." [Look at descriptions - compare to VA list]
 - CSV for field namespaces (MSC == 21400) and Station Numbers for VA private stuff
 - KEY FILES (fix for now based on FOIA refs)
 - any FMQLisms in Schema returned move in here
@@ -94,9 +95,11 @@ class VistaSchema(object):
             return "<INVALID FILE>"
         return self.__schemas[file]["name"]
                             
-    def getFieldIds(self, file):
+    def getFieldIds(self, file, includeMultiples=False):
         sch = self.getSchema(file)
-        return [field["number"] for field in sch["fields"]]
+        if includeMultiples:
+            return [field["number"] for field in sch["fields"]]
+        return [field["number"] for field in sch["fields"] if field["type"] != "9"]
                 
     def getFields(self, file, fieldIds):
         """Return in order of field number, the same order returned by FMQL"""

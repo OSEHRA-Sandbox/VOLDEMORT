@@ -10,6 +10,7 @@
 Module for managing a Cache of FMQL responses. Responses can come from a full RESTful FMQL endpoint or directly from an FMQL RPC. Caches for named VistAs are managed in a named "cacheLocation" directory.
 
 TODO - Changes/Additions Planned:
+- if access/verify etc wrong, do proper cleanup/exception
 - exceptions in thread:
   except: sys.exit()
   and may need to put threads into an array to keep around (check 25 pool again)
