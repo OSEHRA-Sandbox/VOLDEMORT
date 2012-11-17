@@ -123,27 +123,30 @@ class FMQLCacher:
         """
         if not self.__isSchemaCached():
             self.__cacheSchema()
-        queryFile = self.__cacheLocation + "/SELECT TYPES.json"
+        queryFile = self.__cacheLocation + "/SELECT TYPES BADTOO.json"
         selectTypesReply = json.load(open(queryFile))
         for result in selectTypesReply["results"]:
             if float(result["number"]) < 1.1: 
-                continue # TEMP - ignore under 1.1
-            queryFile = self.__cacheLocation + "/DESCRIBE TYPE " + re.sub(r'\.', '_', result["number"]) + ".json"
+                continue # TODO: once FOIA up, include under 1.1
+            fmqlId = re.sub(r'\.', '_', result["number"])
+            queryFile = self.__cacheLocation + "/DESCRIBE TYPE " + fmqlId + ".json"
             if not os.path.isfile(queryFile):
                 raise Exception("Expected Schema for %s to be in Cache but it wasn't - exiting" % result["number"])
             jreply = json.load(open(queryFile))
+            if "fmql" not in jreply: # omission for errors
+                jreply["fmql"] = {"TYPE": fmqlId}
             if "count" in result:
                 jreply["count"] = result["count"]
             yield jreply
             
     def __isSchemaCached(self):
-        queryFile = self.__cacheLocation + "/SELECT TYPES.json"
+        queryFile = self.__cacheLocation + "/SELECT TYPES BADTOO.json"
         if not os.path.isfile(queryFile):
             return False
         selectTypesReply = json.load(open(queryFile))
         for result in selectTypesReply["results"]:
             if float(result["number"]) < 1.1: 
-                continue # TEMP - ignore under 1.1
+                continue # TODO - ignore under 1.1
             queryFile = self.__cacheLocation + "/DESCRIBE TYPE " + re.sub(r'\.', '_', result["number"]) + ".json"
             if not os.path.isfile(queryFile):
                 return False
@@ -154,7 +157,7 @@ class FMQLCacher:
     # Elapsed Time to cache schema in 50 pieces: 136.819022894
     def __cacheSchema(self):
         start = time.time()
-        reply = self.query("SELECT TYPES")
+        reply = self.query("SELECT TYPES BADTOO")
         queriesQueue = Queue.Queue()
         for i in range(self.__poolSize):
             fmqlIF = self.__fmqlIF # TODO: shared makes no speed difference (make sure)
@@ -163,8 +166,8 @@ class FMQLCacher:
             t.start()
         # logging.info("Caching %d types at a time" % self.__poolSize)
         for result in reply["results"]:
-            if float(result["number"]) < 1.1: 
-                continue
+            # if float(result["number"]) < 1.1: 
+            #    continue
             queriesQueue.put("DESCRIBE TYPE " + re.sub(r'\.', '_', result["number"]))
         queriesQueue.join()
         # logging.info("Elapsed Time to cache schema in %d pieces: %s" % (self.__poolSize, time.time() - start))        
@@ -379,7 +382,7 @@ class FMQLInterface(object):
         "COUNT": ["COUNT", [("TYPE", "COUNT ([\d\_]+)")]],
         "DESCRIBE TYPE": ["DESCRIBETYPE", [("TYPE", "DESCRIBE TYPE ([\d\_]+)")]],
         "DESCRIBE [\d\_]": ["DESCRIBE", [("TYPE", "DESCRIBE ([\d\_]+)"), ("LIMIT", "LIMIT (\d+)"), ("OFFSET", "OFFSET (\d+)"), ("CNODESTOP", "CSTOP (\d+)")]],
-        "SELECT TYPES": ["SELECTALLTYPES", []]
+        "SELECT TYPES BADTOO": ["SELECTALLTYPES^BADTOO:1", []]
     }
         
     def __queryToRPCForm(self, query):
