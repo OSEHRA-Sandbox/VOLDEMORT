@@ -17,21 +17,11 @@ Generate Schema Comparison Reports using the VistaSchema module. Formats:
 Note: along with VistaSchema, this module can be part of a VOLDEMORT WSGI-based Web service. Such a service would allow analysis of any VistA with FMQL that is accessible from the service.
 
 TODO - Changes/Additions Planned:
-- # files common to both that different in some way (sub multiples as well as fields - show these up above????) 
-- for OTHER ONLY etc
-  - multiples grouped under files for novel top files
-  - separate table for multiples in common files
-    top file    multiples
-       2       .., .., .., etc.
-  [comparator calls into report properly]
-- packages too (2 level ie/ if in > 1 build class - make a static file) ie/ assemble in the file ids per package (redo CSV or just load)
-- namespace logic into schema.py ie/ proper break out
-  - totals on # of class 3 sites, number of class files etc. ie/ of unique files, # that are class 3 vs global spaced.
-- fmqlId and counts logic move into VistaSchema
-- tie in to builds (do separate Files builds report first)
-- leverages Packages support once in VistaSchema
-- fill in Formatted Text and CSV reporters
-- use fixed manifest of VA assigned name spaces ie/ who owns certain number ranges and arrays and highlight this information (ex/ IHS ???, MSC 21400 etc.)
+- # corruptions, deprecated etc.
+- move off fmqlFileId -> . form
+- # the class 3 etc "unique to other" as opposed to just counting total of files
+  - preferably make method in Schema to cut down on size here
+- namespace and package logic into Schema.
 """
 
 import re
@@ -107,11 +97,14 @@ class VistaSchemaComparer(object):
             bsch = self.__bSchema.getSchema(fmqlFileId)
             osch = self.__oSchema.getSchema(fmqlFileId)
             loc = bsch["location"] if "location" in bsch else ""
-            parent = bsch["parent"] if "parent" in bsch else ""
+            parents = bsch["parents"] if "parents" in bsch else None
             # Labs are special - don't count for now. Will change later.
             if re.match(r'63', fileId):
-                reportBuilder.both(no, fileId, bsch["name"], osch["name"], loc, parent, 0, 0, {})
+                reportBuilder.both(no, fileId, bsch["name"], osch["name"], loc, parents, 0, 0, {})
                 continue
+            #
+            # Note: ids DON'T include multiples so counts won't either.
+            #
             bFieldIds = self.__bSchema.getFieldIds(fmqlFileId)
             bCount = self.__safeCount(bsch)
             oFieldIds = self.__oSchema.getFieldIds(fmqlFileId)
@@ -122,9 +115,10 @@ class VistaSchemaComparer(object):
             ocFields = self.__oSchema.getFields(fmqlFileId, cFieldIds)
             renamedFields = {}
             for i in range(len(bcFields)):
-                # Just names for now but should do type etc too
-                if bcFields[i]["name"] != ocFields[i]["name"]:
-                    renamedFields[ocFields[i]["number"]] = (ocFields[i]["name"], bcFields[i]["name"]) 
+                bcFieldNameComp = self.__makeCompName(bcFields[i]["name"])
+                ocFieldNameComp = self.__makeCompName(ocFields[i]["name"])
+                if bcFieldNameComp != ocFieldNameComp:
+                    renamedFields[ocFields[i]["number"]] = (ocFields[i]["name"], bcFields[i]["name"].upper()) # TODO: FOIA FIX - remote UPPER 
                     counts["norenamedFields"] += 1
             if bFieldIds != oFieldIds:
                 bNotOFieldIds = set(bFieldIds).difference(oFieldIds)
@@ -133,14 +127,14 @@ class VistaSchemaComparer(object):
                 oNotBFieldIds = set(oFieldIds).difference(bFieldIds)
                 oNotBFields = self.__oSchema.getFields(fmqlFileId, oNotBFieldIds)
                 counts["noONotBFields"] += len(oNotBFieldIds)
-                reportBuilder.both(no, fileId, bsch["name"], osch["name"], loc, parent, bCount, oCount, renamedFields, len(bFieldIds), bNotOFields, len(oFieldIds), oNotBFields)
+                reportBuilder.both(no, fileId, bsch["name"], osch["name"], loc, parents, bCount, oCount, renamedFields, len(bFieldIds), bNotOFields, len(oFieldIds), oNotBFields)
             else:
-                reportBuilder.both(no, fileId, bsch["name"], osch["name"], loc, parent, bCount, oCount, renamedFields)
+                reportBuilder.both(no, fileId, bsch["name"], osch["name"], loc, parents, bCount, oCount, renamedFields)
         reportBuilder.endBoth()
-                        
-        self.__buildOneOnlyReport(reportBuilder, self.__bSchema, baseOnlyFiles, True)
-        
-        self.__buildOneOnlyReport(reportBuilder, self.__oSchema, otherOnlyFiles, False)
+            
+        self.__buildOneOnlyReport(reportBuilder, self.__bSchema, baseOnlyFiles, self.__bSchema.listFiles(True), True)    
+                            
+        self.__buildOneOnlyReport(reportBuilder, self.__oSchema, otherOnlyFiles, self.__oSchema.listFiles(True), False)
 
         # Number of fields in a system's top files; number in files shared by both systems
         counts["baseCountFields"] = self.__countFields(self.__bSchema, self.__bSchema.listFiles(False))   
@@ -163,20 +157,80 @@ class VistaSchemaComparer(object):
         counts["otherPopTops"] = self.__oSchema.countPopulatedTops()
         
         reportBuilder.counts(counts) 
+        
+    def __makeCompName(self, name):
+        """
+        Flattens name for compare.
+        """
+        # TODO: remove once off old FOIA (will fix up or nix others)
+        # NOTE: goes with fmqlCacher, ignore under 1.1
+        name = re.sub(r' ', '', re.sub(r'[\*`\[\]\?\-\+\.\'\(\)\%\&\#\@\$\{\}\,\_\/\>\<]', '', name.upper()))
+        return name
                                         
-    def __buildOneOnlyReport(self, reportBuilder, schema, files, base=True):
+    def __buildOneOnlyReport(self, reportBuilder, schema, files, topFiles, base=True):
         reportBuilder.startOneOnly(len(files), base)
+        # TODO: count top files properly!
+        reportBuilder.startOneOnlyGroup(groupId="topsClass1", groupBlurb="Unique, complete, class 1 files ...")
+        topsCovered = []
+        realNo = 0
         for no, fmqlFileId in enumerate(files, start=1):
+            if fmqlFileId not in topFiles:
+                continue
             fileId = re.sub(r'\_', '.', fmqlFileId)
+            topsCovered.append(fileId)
             sch = schema.getSchema(fmqlFileId)
+            if sch["class3"]:
+                continue
             if "description" in sch:
                 descr = sch["description"]["value"][:300] + " ..." if len(sch["description"]["value"]) > 300 else sch["description"]["value"]
                 descr = descr.encode('ascii', 'ignore') # TODO: change report save
             else:
                 descr = ""
-            loc = sch["location"] if "location" in sch else ""
-            parent = sch["parent"] if "parent" in sch else ""
-            reportBuilder.oneOnly(no, fileId, sch["name"], loc, parent, descr, noFields=len(schema.getFieldIds(fmqlFileId)), count=self.__safeCount(sch))
+            loc = sch["location"]
+            realNo += 1
+            reportBuilder.oneOnly(realNo, fileId, sch["name"], loc, "", descr, noFields=len(schema.getFieldIds(fmqlFileId)), count=self.__safeCount(sch), class3=sch["class3"])
+        reportBuilder.endOneOnlyGroup()
+        reportBuilder.startOneOnlyGroup(groupId="topsClass3", groupBlurb="Unique, complete, class 3 files ...")
+        realNo = 0
+        for no, fmqlFileId in enumerate(files, start=1):
+            if fmqlFileId not in topFiles:
+                continue
+            fileId = re.sub(r'\_', '.', fmqlFileId)
+            sch = schema.getSchema(fmqlFileId)
+            if not sch["class3"]:
+                continue
+            if "description" in sch:
+                descr = sch["description"]["value"][:300] + " ..." if len(sch["description"]["value"]) > 300 else sch["description"]["value"]
+                descr = descr.encode('ascii', 'ignore') # TODO: change report save
+            else:
+                descr = ""
+            loc = sch["location"]
+            realNo += 1
+            reportBuilder.oneOnly(realNo, fileId, sch["name"], loc, "", descr, noFields=len(schema.getFieldIds(fmqlFileId)), count=self.__safeCount(sch), class3=sch["class3"])
+        reportBuilder.endOneOnlyGroup()
+        reportBuilder.startOneOnlyGroup(groupId="uniqueMultiples", groupBlurb="Unique, multiples in shared files ...")
+        realNo = 0
+        for no, fmqlFileId in enumerate(files, start=1):
+            if fmqlFileId in topFiles:
+                continue
+            fileId = re.sub(r'\_', '.', fmqlFileId)
+            sch = schema.getSchema(fmqlFileId)
+            # Only want unique multiples NOT covered by unique top level files
+            #
+            # TODO: won't work if parent is invalid - sift those out too
+            # ex/ 460203.01 (do full report on these)
+            #
+            if sch["parents"][0] in topsCovered or "invalidParent" in sch:
+                continue
+            if "description" in sch:
+                descr = sch["description"]["value"][:300] + " ..." if len(sch["description"]["value"]) > 300 else sch["description"]["value"]
+                descr = descr.encode('ascii', 'ignore') # TODO: change report save
+            else:
+                descr = ""
+            parents = sch["parents"]
+            realNo += 1
+            reportBuilder.oneOnly(no, fileId, sch["name"], "", parents, descr, noFields=len(schema.getFieldIds(fmqlFileId)), count="-", class3=sch["class3"])
+        reportBuilder.endOneOnlyGroup()
         reportBuilder.endOneOnly() 
         
     def __countFields(self, schema, files):
@@ -197,7 +251,6 @@ class VSHTMLReportBuilder:
         self.__bVistaLabel = baseVistaLabel
         self.__oVistaLabel = otherVistaLabel
         self.__reportLocation = reportLocation
-        self.__parents = {}
         self.__loadNamespaces()
         
     def __loadNamespaces(self):
@@ -215,12 +268,10 @@ class VSHTMLReportBuilder:
         tblStartCompare = "<table><tr><th>Both #</th><th>Name/ID/Locn</th><th># Entries</th><th>Fields Missing</th><th>Custom Fields</th></tr>"
         self.__bothCompareItems.append(tblStartCompare)
                                                 
-    def both(self, no, id, bname, oname, location, parent, bCount, oCount, renamedFields={}, noBFields=-1, bNotOFields=[], noOFields=-1, oNotBFields=[]):
+    def both(self, no, id, bname, oname, location, parents, bCount, oCount, renamedFields={}, noBFields=-1, bNotOFields=[], noOFields=-1, oNotBFields=[]):
         """
         TODO: must change to handle subfiles which have no location but have a container
         """
-        if parent:
-            self.__parents[id] = (parent, bname)
         # only show differences - will still inc no
         # for now ignore / and _ differences. TODO: check if due to old FMQL
         bnameTest = re.sub(r'\/', '_', bname)
@@ -229,13 +280,16 @@ class VSHTMLReportBuilder:
             return
         self.__bothCompareItems.append("<tr id='%s'><td>%d</td>" % (id, no))
         if bnameTest == onameTest:
-            self.__bothCompareItems.append("<td>%s<br/><br/>" % bname)
+            if bname[0] == "*":
+                self.__bothCompareItems.append("<td class='highlight'><span class='titleInCol'>Pending Deletion</span><br/>" + bname + "<br/><br/>")
+            else:
+                self.__bothCompareItems.append("<td>%s<br/><br/>" % bname)                    
         else:
             self.__bothCompareItems.append("<td class='highlight'><span class='titleInCol'>File Name Mismatch</span><br/>" + bname + "<br/><br/>" + oname + "<br/><br/>")
         if location:
             self.__bothCompareItems.append("%s &nbsp;%s</td>" % (id, self.__location(location)))
         else:
-            self.__bothCompareItems.append("%s</td>" % (self.__subFileId(id, parent)))
+            self.__bothCompareItems.append("%s</td>" % (self.__subFileId(id, parents)))
             
         if bCount == oCount:
             if bCount == "-":
@@ -289,6 +343,10 @@ class VSHTMLReportBuilder:
         return muFields
         
     def __vaStationId(self, id):
+        # TODO: add MSC etc which is five long - 214XX 
+        idInt = id.split(".")[0]
+        if len(idInt) != 6:
+            return id
         vaStationId = re.match(r'(\d{3})', id).group(1)
         if vaStationId in self.namespaces:
             return id + " [<strong>" + self.namespaces[vaStationId] + "</strong>]"
@@ -300,31 +358,33 @@ class VSHTMLReportBuilder:
     def endBoth(self):
         self.__bothCompareItems.append("</table></div>")
         
+    # TODO: change to take full schema ie/ no arg by arg - can work on any
     def startOneOnly(self, uniqueCount, base=True):
         BASEBLURB = "%d files are unique to %s. Along with missing fields, these files indicate baseline builds missing from %s. The Build reports cover builds in more detail." % (uniqueCount, self.__bVistaLabel, self.__oVistaLabel)
         OTHERBLURB = "%d files are unique to %s. Along with custom fields added to common files, these indicate the extent of custom functionality in this VistA. Descriptions should help distinguish between files once released centrally by the VA - 'Property of the US Government ...' - and files local to the VistA being compared." % (uniqueCount, self.__oVistaLabel)
         self.__oneOnlyIsBase = base
         oneOnlyStart = "<div class='report' id='%s'><h2>Files only in %s </h2><p>%s</p>" % ("baseOnly" if base else "otherOnly", self.__bVistaLabel if base else self.__oVistaLabel, BASEBLURB if base else OTHERBLURB)
         self.__oneOnlyItems = [oneOnlyStart]
+        
+    def startOneOnlyGroup(self, groupId, groupBlurb):
+        self.__oneOnlyItems.append("<div id='" + groupId + ("Base" if self.__oneOnlyIsBase else "Other") + "'>")    
+        self.__oneOnlyItems.append("<p>" + groupBlurb + "</p>")
         tblStartOne = "<table><tr><th>#</th><th>ID/Locn</th><th>Name</th><th> # Fields</th><th># Entries</th><th>Description (first part)</th></tr>"
         self.__oneOnlyItems.append(tblStartOne)
         
-    def oneOnly(self, no, fileId, name, location, parent, descr, noFields, count):
+    def oneOnly(self, no, fileId, name, location, parents, descr, noFields, count, class3):
         self.__oneOnlyItems.append("<tr id='%s'><td>%d</td>" % (fileId, no))
-        if parent:
-            self.__parents[fileId] = (parent, name)
         if location:
-            fileIdMU = fileId if not re.match(r'\d{6}', fileId) else self.__vaStationId(fileId)
-            self.__oneOnlyItems.append("<td>%s</td><td>%s</td>" % (fileIdMU + "<br/><br/>" + self.__location(location), name))
+            fileIdMU = fileId if not class3 else self.__vaStationId(fileId)
+            nameMU = "<strong>" + name + "</strong><br/>PENDING DELETION" if re.match(r'\*', name) else name
+            self.__oneOnlyItems.append("<td>%s</td><td>%s</td>" % (fileIdMU + "<br/><br/>" + self.__location(location), nameMU))
         else:
-            self.__oneOnlyItems.append("<td>%s</td><td>%s</td>" % (self.__subFileId(fileId, parent), name))
+            self.__oneOnlyItems.append("<td>%s</td><td>%s</td>" % (self.__subFileId(fileId, parents), name))
         self.__oneOnlyItems.append("<td>%s</td><td>%s</td><td>%s</td></tr>" % (noFields, count, descr))
         
-    def __subFileId(self, fileId, parent):
-        ids = [parent, fileId]
-        while parent in self.__parents:
-            ids.insert(0, self.__parents[parent][0])
-            parent = self.__parents[parent][0]
+    def __subFileId(self, fileId, parents):
+        ids = parents
+        ids.append(fileId)
         subFileId = ""
         indent = ""
         indentInc = "&nbsp;&nbsp;&nbsp;"
@@ -345,8 +405,11 @@ class VSHTMLReportBuilder:
             indent = indent + indentInc
         return subFileId
         
-    def endOneOnly(self):
+    def endOneOnlyGroup(self):
         self.__oneOnlyItems.append("</table></div>")
+        
+    def endOneOnly(self):
+        self.__oneOnlyItems.append("</div>")
         if self.__oneOnlyIsBase:
             self.__baseOnlyItems = self.__oneOnlyItems
         else:
@@ -368,7 +431,7 @@ class VSHTMLReportBuilder:
         reportHead = (HTMLREPORTHEAD % ("Schema Comparison Report << VOLDEMORT", " VOLDEMORT Schema Comparison Report"))
         blurb = "<p>Compare two VistA versions, %s ('Other') against %s ('Baseline'). This report shows which files and fields are shared and which are exclusive to one or other VistA. For each file, the report also gives a count of its entries as reported by its FileMan. The most relevant information is highlighted in grey.</p>" % (self.__oVistaLabel, self.__bVistaLabel)
         warning = "<p><strong>Warning:</strong> %s</p>" % WARNING_BLURB if WARNING_BLURB else ""
-        nav = "<p>Jump to: <a href='#counts'>Counts</a> | <a href='#both' class='highlight'>In Both</a> | <a href='#%s' class='highlight'>%s Only</a> | <a href='#%s'>%s Only</a></p>" % ("otherOnly", self.__oVistaLabel, "baseOnly", self.__bVistaLabel)
+        nav = "<p>Jump to: <a href='#counts'>Counts</a> | <a href='#both' class='highlight'>In Both</a> | <a href='#%s' class='highlight'>%s Only</a> (<a href='#topsClass1Base'>Class 1</a>, <a href='#topsClass3Base'>Class 3</a>, <a href='#uniqueMultiplesBase'>Multiples</a>)  | <a href='#%s'>%s Only</a></p>" % ("otherOnly", self.__oVistaLabel, "baseOnly", self.__bVistaLabel)
         reportTail = HTMLREPORTTAIL % datetime.now().strftime("%b %d %Y %I:%M%p")
         
         reportItems = [reportHead, blurb, warning, nav, self.__countsETCMU]
@@ -425,8 +488,8 @@ def demo():
     gCacher.setVista("GOLD")
     oCacher = FMQLCacher("Caches")
     oCacher.setVista("CGVISTA", "http://vista.caregraf.org/fmqlEP")
-    oCacher.setVista("OSGVISTA")
-    vsr = VistaSchemaComparer(VistaSchema("GOLD", gCacher), VistaSchema("OSGVISTA", oCacher))
+    # oCacher.setVista("OSGVISTA")
+    vsr = VistaSchemaComparer(VistaSchema("GOLD", gCacher), VistaSchema("CGVISTA", oCacher))
     reportLocation = vsr.compare(format="HTML")
     print "Report written to %s" % reportLocation
         
