@@ -247,8 +247,9 @@ class FMQLCacher:
                     
 class FMQLDescribeResult(object):
     """
+    A simple facade for easy access to an FMQL Describe result
+    
     TODO: 
-    - uri label: preserve ex/ package label ("label") and ptr ("value")
     - apply filters: yes/no -> true/false, apply defaults etc.
     - will move out: not intrinsic to Cache
     - jsona, qualify uri's, container name, typed fields
@@ -257,10 +258,43 @@ class FMQLDescribeResult(object):
     def __init__(self, result):
         self.__result = result
         
+    def __getitem__(self, field):
+        """Safe return of simple value - if field is not there returns empty string"""
+        return self.__result[field]["value"] if field in self.__result and self.__result[field]["type"] != "cnodes" else ""
+        
     @property
     def id(self):
         return self.__result["uri"]["value"]
+                
+    @property
+    def label(self):
+        return self.__result["uri"]["label"]
         
+    @property
+    def sameAs(self):
+        return self.__result["sameAs"]["value"] if "sameAs" in self.__result else ""
+        
+    @property
+    def sameAsLabel(self):
+        return self.__result["sameAsLabel"]["value"] if "sameAsLabel" in self.__result else ""    
+        
+    def fieldInfos(self):
+        """Schema from the reply"""
+        return [(field, self.__result[field]["type"], self.__result[field]["fmId"]) for field in self.__result if field != "uri"]   
+        
+    def hasField(self, field):
+        return True if field in self.__result else False 
+        
+    def uriLabel(self, field):
+        """Label of a pointer"""
+        return "" if not (field in self.__result and self.__result[field]["type"] == "uri") else self.__result[field]["label"].split("/")[1]
+        
+    def sameAs(self, field):
+        pass
+    
+    def sameAsLabel(self, field):
+        pass
+                
     def cstopped(self, flatten=False):
         """Return as if CSTOP=0"""
         return self.__flatten(self.__result, False)
@@ -300,6 +334,15 @@ class FMQLDescribeResult(object):
             fcnode["vse:container"] = self.id
             cnodes.append(fcnode)
         return cnodes
+        
+    # TODO: merge with cnodes (need to change VDM use first)
+    def cnodesFD(self, cnodeField):
+        if cnodeField not in self.__result:
+            return [] # makes it easier to traverse
+        # TODO: may exception
+        if "stopped" in self.__result[cnodeField]:
+            return []
+        return [FMQLDescribeResult(cr) for cr in self.__result[cnodeField]["value"]]
         
     def __flatten(self, dr, includeCNodes=True, nixURI=False):
         fdr = {}
@@ -359,6 +402,9 @@ class FMQLInterface(object):
     """
     TODO: urllib2 etc timeout in seconds (instead of ? default)
     ... socket.setdefaulttimeout(default_timeout)
+    
+    TODO: replace with direct invoke of FMQLQP.py ie/ let it deal with
+    formatting etc. ie/ merge with Apache hosted FMQL EP code.
     
     Allow access to either the RPC directly (connection pool) or 
     to the FMQL EP. Note that you shouldn't invoke more RPCs than
