@@ -6,19 +6,19 @@
 #
 
 """
-Module for retrieving, caching and analysing a VistA's schemas returned by FMQL
+TODO: add in Package designation for a file (if any)
 
-TODO - Changes/Additions Planned:
-- quick neaten: nix using fmqlFileId (_ for .)
-- tie in Packages ie/ from Slim Package grab, do hierarchy. Make a master copy.
-  - issue of common files: PATIENT/REGISTRATION
-  - station number to field name for class 3: New fields within the VA should be given field numbers in the format of NNNXXX, where NNN is the 3-digit VA station identifier and XXX is a three-digit sequence number, usually 001 and going up from there for a given file.  New nodes should be added as nodes NNNXXX, same format, not in the low numerics, not in the alpha series of nodes". Ex/ acceptance (460001) ... ess people (776000) ... lblk1 choices (500003) ... or even collect (580950.1) 
-- FMQL: ensure all meta - VR, INPUT TR etc. Input Tr often differs with data there ie mandatory or not ie. live vs meta data mismatch
-- Frozen Files: ex/ 59.7 - "THERE SHOULD ONLY BE ONE ENTRY IN THIS FILE. Because of the nature of this file and the fact that ALL the Pharmacy packages use this file, it is VERY IMPORTANT to stress that sites DO NOT edit fields or make local field additions to the Pharmacy System file." [Look at descriptions - compare to VA list]
-- CSV for field namespaces (MSC == 21400) and Station Numbers for VA private stuff
-- KEY FILES (fix for now based on FOIA refs)
-- any FMQLisms in Schema returned move in here
-  - ie/ . not _ to match Builds file ids
+Module for retrieving, caching and analysing a VistA's schemas returned by FMQL. It reflects FMQL's "cut to the data" approach towards VistA information where data is taken directly from FileMan and finessed by interested clients.
+
+For all files, notes:
+- number of entries according to FileMan
+- all fields with types, names, input transforms, ranges of enums, formula's of computed fields etc.
+- parent relationships
+- class of file
+- packages
+- version of file (if in FileMan) and package ("version", "vpackage")
+- corruption in file or field meta
+and overall, the total number of data points represented by this information
 """
 
 import os
@@ -36,42 +36,61 @@ __all__ = ['VistaSchema']
 
 class VistaSchema(object):
     """
-    Access to the cached FMQL description of a Vista's Schema
+    Access to the cached FMQL descriptions of a Vista's Schema
     """
     
     def __init__(self, vistaLabel, fmqlCacher):
         self.vistaLabel = vistaLabel
         self.__fmqlCacher = fmqlCacher
-        self.__corruptTypes = []
         self.__makeSchemas() 
         
     def __str__(self):
         return "Schema of %s" % self.vistaLabel
         
-    def getNoSpecificValues(self):
-        pass # TODO: ala builds etc, count specific values
+    def noSpecificValues(self):
+        cnt = 0
+        for fl in self.__schemas:
+            flInfo = self.__schemas[fl]
+            cnt += len(flInfo.keys())
+            if "corruption" in flInfo:
+                continue
+            cnt = cnt - 1 # take away one for fields list
+            cnt += sum([len(fldInfo.keys()) for fldInfo in flInfo["fields"]])
+        return cnt
         
-    def listFiles(self, topOnly=False):
+    def files(self, topOnly=False):
+        """Convenience for this frequent option"""
         if topOnly:
-            topFiles = []
-            for fileId in self.__schemas:
-                if not self.__schemas[fileId]:
-                    continue # error file
-                if "parent" in self.__schemas[fileId]:
-                    continue
-                topFiles.append(fileId)
-            return topFiles
+            return self.filesWithoutAttr("parent")
         return self.__schemas.keys()
         
-    def listCorruptFiles(self):
-        return self.__corruptTypes
-        
     def countFiles(self, topOnly=False):
-        return len(self.listFiles(topOnly))
+        # DEPRECATED - use len(files(
+        return len(self.files(topOnly))
+        
+    def filesWithAttr(self, attribute, files=None):
+        """
+        The meta is constructed so that key aspects come with or without attributes:
+        - class3 file will have the attribute "class3"
+        - corrupt file will have the attribute "corrupt"
+        etc.
+        
+        Other attributes to use: "parent", "corruptFields"
+        
+        Can recurse ie/ filesWithAttr("parent", filesWithAttr("class3"))
+        """
+        files = self.__schemas.keys() if not files else files
+        return filter(lambda x: attribute in self.__schemas[x], files)
+        
+    def filesWithoutAttr(self, attribute):
+        """
+        Opposite of "WithAttr"
+        """
+        return filter(lambda x: attribute not in self.__schemas[x], self.__schemas.keys())        
         
     def countPopulatedTops(self):
         """
-        How many of top level files are populated - not many in FOIA/GOLD
+        How many of top level files are populated - half in FOIA/GOLD
         """
         if not self.__schemas:
             self.__makeSchemas()
@@ -79,7 +98,7 @@ class VistaSchema(object):
         for fileId in self.__schemas:
             if "parent" in self.__schemas[fileId]:
                 continue
-            if "count" not in self.__schemas[fileId]:
+            if "count" not in self.__schemas[fileId]: # corrupt
                 continue
             if not self.__schemas[fileId]["count"]:
                 continue
@@ -88,73 +107,61 @@ class VistaSchema(object):
         return no              
         
     def getSchema(self, file):
-        sch = self.__schemas[file]
-        # TODO: move down to cached meta
-        if "parent" in sch:
-            parents = []
-            psch = sch
-            while "parent" in psch:
-                parents.insert(0, psch["parent"])
-                try:
-                    psch = self.__schemas[re.sub(r'\.', '_', psch["parent"])]
-                except:
-                    sch["invalidParent"] = psch["parent"]
-                    break # assume parent invalid!
-            sch["parents"] = parents
-            sch["class3"] = self.__isClass3File(parents[0])
-        else:
-            sch["class3"] = self.__isClass3File(file)
         return self.__schemas[file]
-        
-    def __isClass3File(self, file):
-        filePrefix = re.split(r'[\.\_]', file)[0]
-        return True if len(filePrefix) == 6 and int(filePrefix) > 101000 else False
-        
-    def __parent(self, file, parent):
-        ids = [parent, fileId]
-        while parent in self.__parents:
-            ids.insert(0, self.__parents[parent][0])
-            parent = self.__parents[parent][0]
-        subFileId = ""
-        indent = ""
-        indentInc = "&nbsp;&nbsp;&nbsp;"
-        for id in ids:
-            idMU = id
-            if subFileId:
-                subFileId += "<br/>"
-                """
-                Check all subfiles for ...
-                The VA FileMan subdictionary numbers should be assigned at the high end of the numbering sequence, following the numbering convention outlined. For example, a VA FileMan subdictionary number added to the Patient file (File 2) by station 368 should be 2.368001, a second subdictionary should be assigned 2.368002
-                """
-                if re.search(r'\.\d{6}$', id):
-                    sid = id.split(".")[1]
-                    idMU = id.split(".")[0] + "." + self.__vaStationId(sid)
-            elif re.match(r'\d{6}', id): # check parent file if local site
-                idMU = self.__vaStationId(id)
-            subFileId = subFileId + indent + idMU
-            indent = indent + indentInc
-        return subFileId
-        
+                
     def getFileName(self, file):
         if file not in self.__schemas:
             return "<INVALID FILE>"
+        if "corruption" in self.__schemas[file]:
+            return "<CORRUPT FILE - NO NAME>"
         return self.__schemas[file]["name"]
                             
-    def getFieldIds(self, file, includeMultiples=False):
+    def fields(self, file, includeMultiples=False, corruptOnly=False):
         """
-        Return field ids of non corrupt fields
+        Return field ids. Includes corrupt fields.
         """
+        if corruptOnly:
+            return self.fieldsWithAttr(file, "corruption")
         sch = self.getSchema(file)
+        if "corruption" in sch:
+            return []
         if includeMultiples:
-            return [field["number"] for field in sch["fields"] if "name" in field]
-        return [field["number"] for field in sch["fields"] if "name" in field and field["type"] != "9"]
+            return [field["number"] for field in sch["fields"]]
+        return self.fieldsWithoutAttr(file, "multiple")   
         
-    def getCorruptFields(self, file):
+    def fieldsWithAttr(self, file, attr=None):
+        """
+        See list of attributes in 'getFields'
+        """
         sch = self.getSchema(file)
-        return [field for field in sch["fields"] if "name" not in field]        
+        if "corruption" in sch:
+            return []
+        if not attr:
+            return [field["number"] for field in sch["fields"]]
+        return [field["number"] for field in sch["fields"] if attr in field]
+        
+    def fieldsWithoutAttr(self, file, attr):
+        sch = self.getSchema(file)
+        if "corruption" in sch:
+            return []
+        return [field["number"] for field in sch["fields"] if attr not in field]
                 
+    def allFieldsWithAttr(self, attr=None, files=None): 
+        # across all files, None == all
+        fields = []
+        files = self.__schemas.keys() if not files else files
+        for fl in files:
+            fields.extend(map(lambda x: fl + ":" + x, self.fieldsWithAttr(fl, attr)))
+        return fields
+                                
     def getFields(self, file, fieldIds):
-        """Return in order of field number, the same order returned by FMQL"""
+        """
+        - Return in order of field number, the same order returned by FMQL
+        - If corrupt, [corruption] gives why
+        - If deprecated, then [deprecated] set to True
+        
+        Full list of properties: index  name  deprecated  description  number  inputTransform  flags  location  computation  computation001   hidden  type  details}
+        """
         sch = self.getSchema(file)
         if not len(fieldIds):
             return []
@@ -173,12 +180,13 @@ class VistaSchema(object):
         """
         pass
         
+    """
     def sortFiles(self, fileSet):
-        """TODO: remove once move ids properly in here"""
         return sorted(fileSet, key=lambda item: float(re.sub(r'\_', ".", item)))
         
     def dotFiles(self, fileSet):
         return [float(re.sub(r'\_', ".", item)) for item in fileSet]
+    """
         
     def __makeSchemas(self):
         """
@@ -186,24 +194,60 @@ class VistaSchema(object):
         """
         logging.info("%s: Schema - building Schema Index ..." % self.vistaLabel)
         self.__schemas = {}
-        self.__corruptSchemas = {}
         start = datetime.now()
         for i, dtResult in enumerate(self.__fmqlCacher.describeSchemaTypes()):
-            if "error" in dtResult:
-                self.__corruptTypes.append((dtResult["fmql"]["TYPE"], dtResult["error"]))
-                continue
-            fileId = dtResult["number"]
+            fileId = dtResult["number"] if "number" in dtResult else dtResult["fmql"]["TYPE"] # account for error
             fmqlFileId = re.sub(r'\.', '_', fileId)
-            self.__schemas[fmqlFileId] = dtResult
+            self.__schemas[fileId] = dtResult
+            if "error" in dtResult:
+                dtResult["corruption"] = dtResult["error"] # just to make symmetric with fieldInfo
+                continue
+            if re.match(r'\*', dtResult["name"]):
+                dtResult["deprecated"] = True
             for field in dtResult["fields"]:
-                if "name" not in field: # expect "corruption"
+                if "corruption" in field:
+                    dtResult["corruptFields"] = True
                     continue
+                if self.__isClass3Number(field["number"]):
+                    field["class3"] = True
                 if re.match(r'\*', field["name"]):
                     field["deprecated"] = True
-                # TODO: remove once off old FOIA (will fix up or nix others)
-                # NOTE: goes with fmqlCacher, ignore under 1.1
-                field["name"] = re.sub(r', *', ' ', re.sub(r'[\[\]\?\-\+\.\'\(\)\%\&\#\@\$\{\}]', '', re.sub("[\_\/\>\<]", " ", field["name"].upper())))
+                if field["type"] == "9":
+                    field["multiple"] = True
+                    continue
+                if "computation" in field and field["number"] == ".001":
+                    field["computation001"] = field["computation"]
+                    del field["computation"] # want to differentiate
+        # Note parents once all schemas gathered
+        for sch in self.__schemas.values():
+            if "corruption" not in sch:
+                self.__noteParentsAndClass(sch)
         logging.info("%s: ... building (with caching) took %s" % (self.vistaLabel, datetime.now()-start))
+        
+    def __noteParentsAndClass(self, sch):
+        if "parent" in sch:
+            parents = []
+            psch = sch
+            while "parent" in psch:
+                parents.insert(0, psch["parent"])
+                try:
+                    psch = self.__schemas[psch["parent"]]
+                except:
+                    sch["corruption"] = "Invalid Parent: " + psch["parent"]
+                    break
+            sch["parents"] = parents
+            if self.__isClass3Number(parents[0]):
+                sch["class3"] = parents[0]
+        else:
+            if self.__isClass3Number(sch["number"]):
+                sch["class3"] = None # ie/ due to self
+            
+    def __isClass3Number(self, id):
+        """
+        TODO: review - may not be true that all in this range are Class 3
+        """
+        prefix = re.split(r'[\.\_]', id)[0]
+        return True if len(prefix) == 6 and int(prefix) > 101000 else False
 
 # ######################## Module Demo ##########################
                        
@@ -227,10 +271,19 @@ def demo():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     from copies.fmqlCacher import FMQLCacher
     cacher = FMQLCacher("Caches")
-    cacher.setVista("CGVISTA", "http://vista.caregraf.org/fmqlEP") 
-    vair = VistaSchema("CGVISTA", cacher)
-    print "Name of file 2: %s" % vair.getSchema("442033_02")["name"]
-    print vair.listFiles()
-                
+    # cacher.setVista("CGVISTA", "http://vista.caregraf.org/fmqlEP") 
+    cacher.setVista("GOLDNEW")
+    
+    # vair = VistaSchema("CGVISTA", cacher)
+    vair = VistaSchema("GOLDNEW", cacher)
+    print "Number of files %d, top only %d" % (vair.countFiles(), vair.countFiles(True))
+    print "Corrupt Files %d, with corrupt fields %d, deprecated %d, class 3 %d, with .001 field %d, with version set %d" % (len(vair.filesWithAttr(attribute="corruption")), len(vair.filesWithAttr("corruptFields")), len(vair.filesWithAttr("deprecated")), len(vair.filesWithAttr("class3")), len(vair.allFieldsWithAttr("computation001")), len(vair.filesWithAttr("deprecated")))
+    topFiles = vair.files(True)
+    print "Corrupt Top Files %d, with corrupt fields %d, deprecated %d, class 3 %d, with .001 field %d" % (len(vair.filesWithAttr("corruption", topFiles)), len(vair.filesWithAttr("corruptFields", topFiles)), len(vair.filesWithAttr("deprecated", topFiles)), len(vair.filesWithAttr("class3", topFiles)), len(vair.allFieldsWithAttr("computation001", topFiles))) 
+    print "Total fields %d, corrupt %d, computed fields %d, with transforms %d, with simple indexes %d, class 3 fields %d, class 3 fields in non class 3 files %d" % (len(vair.allFieldsWithAttr()), len(vair.allFieldsWithAttr("corruption")), len(vair.allFieldsWithAttr("computation")), len(vair.allFieldsWithAttr("inputTransform")), len(vair.allFieldsWithAttr("index")), len(vair.allFieldsWithAttr("class3")), len(vair.allFieldsWithAttr("class3", vair.filesWithoutAttr("class3"))))
+    print "Number of data points: %d" % vair.noSpecificValues()
+    print "First 10 computed fields - %s" % str(vair.allFieldsWithAttr("computation")[0:10])
+    
+
 if __name__ == "__main__":
     demo()
