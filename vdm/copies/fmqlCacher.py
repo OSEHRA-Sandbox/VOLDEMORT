@@ -423,11 +423,12 @@ class FMQLInterface(object):
             reply = self.rpcCPool.invokeRPC("CG FMQL QP", [self.__queryToRPCForm(query)])
             return reply
         return urllib2.urlopen(self.fmqlEP + "?" + urllib.urlencode({"fmql": query})).read()
-
+    
     QUERYFORMS = { # TODO: enforce mandatory
         "COUNT": ["COUNT", [("TYPE", "COUNT ([\d\_]+)")]],
         "DESCRIBE TYPE": ["DESCRIBETYPE", [("TYPE", "DESCRIBE TYPE ([\d\_]+)")]],
-        "DESCRIBE [\d\_]": ["DESCRIBE", [("TYPE", "DESCRIBE ([\d\_]+)"), ("LIMIT", "LIMIT (\d+)"), ("OFFSET", "OFFSET (\d+)"), ("CNODESTOP", "CSTOP (\d+)")]],
+        "DESCRIBE [\d\_]+": ["DESCRIBE", [("TYPE", "DESCRIBE ([\d\_]+)"), ("LIMIT", "LIMIT (\d+)"), ("OFFSET", "OFFSET (\d+)"), ("CNODESTOP", "CSTOP (\d+)")]],
+        "SELECT [\d\_]+": ["SELECT", [("TYPE", "SELECT ([\d\_]+)"), ("LIMIT", "LIMIT (\d+)")]],
         "SELECT TYPES BADTOO": ["SELECTALLTYPES^BADTOO:1", []]
     }
         

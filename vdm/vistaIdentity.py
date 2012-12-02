@@ -71,6 +71,7 @@ class VistaIdentity(object):
 import getopt, sys # for isolation testing
                        
 def demo():
+
     opts, args = getopt.getopt(sys.argv[1:], "")
 
     # ex/ python vdm.vistaIdentity CGVISTA HOST PORT 'ACCESS' 'VERIFY'
@@ -81,7 +82,7 @@ def demo():
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     from copies.fmqlCacher import FMQLCacher
     cacher = FMQLCacher("Caches")
-    cacher.setVista(args[0], args[1], args[2], args[3], args[4]) 
+    cacher.setVista(vistaLabel=args[0], host=args[1], port=int(args[2]), access=args[3], verify=args[4]) 
     vi = VistaIdentity(args[0], cacher)
     # ex/ {u'state': u'STATE/OKLAHOMA', 'domain': u'DOMAIN/VISTA.GOLD.MEDSPHERE.COM', u'facility_type': u'FACILITY TYPE/VAO', u'station_number': u'050', u'name': u'SOFTWARE SERVICE'}
     print vi.identifiers()
