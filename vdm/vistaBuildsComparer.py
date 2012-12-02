@@ -18,11 +18,11 @@ import sys
 import os
 import cgi
 from datetime import datetime 
+from collections import defaultdict
 from vistaBuilds import VistaBuilds
 from vdmU import HTMLREPORTHEAD, HTMLREPORTTAIL, WARNING_BLURB
 
 __all__ = ['VistaBuildsComparer']
-__version__ = ".3"
 
 class VistaBuildsComparer(object):
 
@@ -31,6 +31,9 @@ class VistaBuildsComparer(object):
     
     TODO: 
     - tie in Package if in Build
+      - why # of packages different from 9_4 ... also should I get a flat 9_4 in here for descriptions etc. 
+      - focus in on Packages effected by other only builds
+    - want to show a table of builds per package ie/ order by package? Show number of packages with a different build.
     - subclass VistaReporter which can define reportsLocation etc.
     - dynamic chart example ie/ not HTML but a simple "demo" of number of builds
     installed. 
@@ -84,11 +87,26 @@ class VistaBuildsComparer(object):
         basePackages = self.__bBuilds.listPackages()
         otherPackages = self.__oBuilds.listPackages()
         commonPackages = set(basePackages).intersection(otherPackages)
+        
+        # for otherOnlyBuilds, what are their packages if any?
+        # ... work out names for these ie/ packages effected by other only builds
+        otherOnlyBuildsPackages = defaultdict(list)
+        otherOnlyBuildsNoPackage = []
+        for buildName in otherOnlyBuilds:
+            buildAbout = self.__oBuilds.describeBuild(buildName)
+            if "vse:package_name" in buildAbout:
+                otherOnlyBuildsPackages[buildAbout["vse:package_name"]].append(buildName)
+            else:
+                otherOnlyBuildsNoPackage.append(buildName)
                 
         # With this can calculate total, baseOnly, otherOnly, both (total - baseOnly + otherOnly), oneOnly (baseOnly + otherOnly); baseMultis = base
-        reportBuilder.counts(total=len(allBuilds), installed=len(allInstalledBuilds), common=len(commonBuilds), baseTotal=len(baseBuilds), baseOnly=len(baseOnlyBuilds), otherTotal=len(otherBuilds), otherOnly=len(otherOnlyBuilds), basePackages=len(basePackages), otherPackages=len(otherPackages), commonPackages=len(commonPackages))
+        reportBuilder.counts(total=len(allBuilds), installed=len(allInstalledBuilds), common=len(commonBuilds), baseTotal=len(baseBuilds), baseOnly=len(baseOnlyBuilds), otherTotal=len(otherBuilds), otherOnly=len(otherOnlyBuilds), basePackages=len(basePackages), otherPackages=len(otherPackages), commonPackages=len(commonPackages), otherOnlyBuildsPackages=len(otherOnlyBuildsPackages))
         
         reportBuilder.valuesCounts(self.__bBuilds.getNoSpecificValues(), self.__oBuilds.getNoSpecificValues())
+        
+        # TODO: skip FOIA INTERACTION OPTIONS 1.0 as well as FMQL as not 
+        # important - must add filter here etc.
+        
         reportBuilder.dateRanges(
         self.__bBuilds.describeBuild(baseBuilds[0])["vse:last_install_effect"], 
         self.__bBuilds.describeBuild(baseBuilds[-1])["vse:last_install_effect"], 
@@ -119,9 +137,9 @@ class VBHTMLReportBuilder:
         self.__oVistaLabel = otherVistaLabel
         self.__reportLocation = reportLocation
                 
-    def counts(self, total, installed, common, baseTotal, baseOnly, otherTotal, otherOnly, basePackages, otherPackages, commonPackages):
+    def counts(self, total, installed, common, baseTotal, baseOnly, otherTotal, otherOnly, basePackages, otherPackages, commonPackages, otherOnlyBuildsPackages):
     
-        self.__countsETCMU = "<div class='report' id='counts'><h2>Build Counts</h2><dl><dt>Total/Installed/Common</dt><dd>%d/%d/%d</dd><dt>%s Installed/Unique</dt><dd>%d/%d</dd><dt>%s Installed/Unique</dt><dd>%d/<span class='highlight'>%d</span></dd><dt>Packages</dt><dd>%d base/%d other/%d common</dd>" % (total, installed, common, self.__bVistaLabel, baseTotal, baseOnly, self.__oVistaLabel, otherTotal, otherOnly, basePackages, otherPackages, commonPackages) 
+        self.__countsETCMU = "<div class='report' id='counts'><h2>Counts</h2><dl><dt>Total/Installed/Common</dt><dd>%d/%d/%d</dd><dt>%s Installed/Unique</dt><dd>%d/%d</dd><dt>%s Installed/Unique</dt><dd>%d/<span class='highlight'>%d</span></dd><dt>Packages</dt><dd>%d base/%d other/%d common/%d other only affected</dd>" % (total, installed, common, self.__bVistaLabel, baseTotal, baseOnly, self.__oVistaLabel, otherTotal, otherOnly, basePackages, otherPackages, commonPackages, otherOnlyBuildsPackages) 
         
     def valuesCounts(self, baseValuesCount, otherValuesCount):
         self.__countsETCMU += "<dt>Datapoints - Base/Other</dt><dd>%d/%d</dd>" % (baseValuesCount, otherValuesCount)

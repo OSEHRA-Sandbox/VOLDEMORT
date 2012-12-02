@@ -63,7 +63,7 @@ class VistaBuilds(object):
         """
         TODO: may just move Package file in here ie/ get shallow 9_4 and nix all the other Package file logic (or leave for Routines and later)
         """
-        return [(packageId, self.__packages[packageId]) for packageId in sorted(self.__packages.keys(), key=lambda x: int(x.split("-")[1]))]
+        return [self.__packages[packageId] for packageId in sorted(self.__packages.keys(), key=lambda x: int(x.split("-")[1]))]
         
     def getBuildsOfPackage(self, packageName):
         return self.__buildsByPackageName[packageName]
@@ -183,6 +183,12 @@ class VistaBuilds(object):
         """
         return [] if buildName not in self.__buildMultiples else self.__buildMultiples[buildName]
         
+    def describeBuildRequired(self, buildName):
+        """
+        Required build of a build.
+        """
+        return [] if buildName not in self.__buildRequired else self.__buildRequired[buildName]
+        
     __ALL_LIMIT = 200
                 
     def __indexNCleanBuilds(self):
@@ -200,6 +206,7 @@ class VistaBuilds(object):
         self.__buildAbouts = OrderedDict()
         self.__buildFiles = {}
         self.__buildMultiples = {}
+        self.__buildRequired = {}
         self.__buildGlobals = {}
         self.__buildRoutines = {} # from build components
         self.__buildRPCs = {} # from build components
@@ -220,9 +227,11 @@ class VistaBuilds(object):
             if "package_file_link" in buildResult:
                 packageName = buildResult["package_file_link"]["label"].split("/")[1]
                 self.__buildAbouts[name]["vse:package_name"] = packageName
-                self.__buildAbouts[name]["vse:package"] = buildResult["package_file_link"]["value"]
+                # VAVISTA/FMQL bug? {u'fmId': u'1', u'fmType': u'7', u'type': u'uri', u'value': u'9_4-RADIOLOGY/NUCLEAR MEDICINE', u'label': u'PACKAGE/RADIOLOGY_NUCLEAR MEDICINE'}
+                packageId = buildResult["package_file_link"]["value"] if not re.search(r'[A-Za-z]', buildResult["package_file_link"]["value"]) else "9_4-10000"
+                self.__buildAbouts[name]["vse:package"] = packageId
                 self.__buildsByPackageName[packageName] = name
-                self.__packages[buildResult["package_file_link"]["value"]] = packageName
+                self.__packages[packageId] = packageName
             self.__buildAbouts[name]["vse:ien"] = buildResult["uri"]["value"].split("-")[1]
             self.__buildAbouts[name]["vse:status"] = "NEVER_INSTALLED" # overridden below
             if "file" in dr.cnodeFields():
@@ -235,6 +244,8 @@ class VistaBuilds(object):
                 self.__buildGlobals[name] = [cnode for cnode in dr.cnodes("global") if "global" in cnode]
             if "multiple_build" in dr.cnodeFields():                
                 self.__buildMultiples[name] = [cnode for cnode in dr.cnodes("multiple_build") if "multiple_build" in cnode]
+            if "required_build" in dr.cnodeFields():                
+                self.__buildRequired[name] = [cnode for cnode in dr.cnodes("required_build") if "required_build" in cnode]
             # TODO: required build for tracing if want to be full Build analysis framework
             if "package_namespace_or_prefix" in dr.cnodeFields():
                 pass # may join?
@@ -316,7 +327,6 @@ def demo():
     cgbs = VistaBuilds("CGVISTA", cacher)
     buildNames = cgbs.listBuilds()
     packageNames = cgbs.listPackages()
-    print packageNames
     print len(packageNames)
     print len(buildNames)
     print len(cgbs.listBuilds(False))
